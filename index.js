@@ -1,5 +1,6 @@
 const express = require('express');
 const { auth, requiresAuth } = require('express-openid-connect');
+const fs = require('fs');
 const http = require('http');
 const https = require('https');
 
@@ -26,6 +27,49 @@ const config = {
     response_type: 'code',
   },
 };
+
+const ACCESS_FILE = process.env.ACCESS_FILE;
+
+function listsDiffer(a, b) {
+  if(a.length != b.length) {
+    return true;
+  }
+  for(let i = 0; i < a.length; ++i) {
+    if(a[i] != b[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+let allowedUsers = [];
+function loadAllowedUsers() {
+  fs.readFile(ACCESS_FILE, 'utf8', (err, data) => {
+    if(err) {
+      console.error(err);
+      process.exit(1);
+    }
+
+    // Load the list
+    const loadedUsers = [];
+    for(let line of data.split('\n')) {
+      line = line.trim();
+      if(line.length > 0 && line[0] != '#') {
+        loadedUsers.push(line);
+      }
+    }
+
+    // Log if the list has changed
+    if(listsDiffer(allowedUsers, loadedUsers)) {
+      console.log('Loaded new users list');
+    }
+
+    // Update global and reset timer
+    allowedUsers = loadedUsers;
+    setTimeout(loadAllowedUsers, 30000);
+  });
+}
+loadAllowedUsers();
 
 const upstream_url = new URL(process.env.UPSTREAM);
 let UPSTREAM_PROTO, UPSTREAM_PORT;
@@ -93,7 +137,16 @@ function proxy(req, res) {
 }
 
 app.all('/*', (req, res) => {
-  proxy(req, res);
+  // If we are not authenticated with OIDC, we will be redirected to do the auth
+  // (because authRequired is set)
+
+  if(allowedUsers.indexOf(req.oidc.user.sub) == -1) {
+    // Unauthorized user, reject
+    res.sendStatus(403);
+  } else {
+    // Otherwise, proxy
+    proxy(req, res);
+  }
 });
 
 app.listen(PORT, () => {
