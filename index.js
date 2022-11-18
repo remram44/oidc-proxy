@@ -9,7 +9,7 @@ const PORT = 3000;
 const app = express();
 
 const config = {
-  authRequired: true,
+  authRequired: false,
   auth0Logout: true,
   baseURL: process.env.BASE_URL,
   secret: process.env.SECRET,
@@ -145,16 +145,30 @@ function proxy(req, res) {
 }
 
 app.all('/*', (req, res) => {
-  // If we are not authenticated with OIDC, we will be redirected to do the auth
-  // (because authRequired is set)
-
-  if(allowedUsers.indexOf(req.oidc.user.sub) == -1) {
+  // Check bypass token, then OIDC login
+  if(req.headers['x-oidc-proxy-bypass']) {
+    // Token is set, check it
+    if(bypassTokens.indexOf(req.headers['x-oidc-proxy-bypass']) === -1) {
+      // Bad token
+      res.sendStatus(403);
+      return;
+    }
+  } else if(!req.oidc.isAuthenticated()) {
+    // Not authenticated, send login form or error
+    if(req.accepts('html')) {
+      return res.oidc.login();
+    } else {
+      res.sendStatus(403);
+      return;
+    }
+  } else if(allowedUsers.indexOf(req.oidc.user.sub) == -1) {
     // Unauthorized user, reject
     res.sendStatus(403);
-  } else {
-    // Otherwise, proxy
-    proxy(req, res);
+    return;
   }
+
+  // Otherwise, proxy
+  proxy(req, res);
 });
 
 app.listen(PORT, () => {
