@@ -43,6 +43,7 @@ function listsDiffer(a, b) {
 }
 
 let allowedUsers = [];
+let bypassTokens = [];
 function loadAllowedUsers() {
   fs.readFile(ACCESS_FILE, 'utf8', (err, data) => {
     if(err) {
@@ -52,20 +53,27 @@ function loadAllowedUsers() {
 
     // Load the list
     const loadedUsers = [];
+    const loadedTokens = [];
     for(let line of data.split('\n')) {
       line = line.trim();
       if(line.length > 0 && line[0] != '#') {
-        loadedUsers.push(line);
+        if(line[0] == '%') {
+          loadedTokens.push(line.substring(1));
+        } else {
+          loadedUsers.push(line);
+        }
       }
     }
 
     // Log if the list has changed
-    if(listsDiffer(allowedUsers, loadedUsers)) {
+    if(listsDiffer(allowedUsers, loadedUsers)
+    || listsDiffer(bypassTokens, loadedTokens)) {
       console.log('Loaded new users list');
     }
 
     // Update global and reset timer
     allowedUsers = loadedUsers;
+    bypassTokens = loadedTokens;
     setTimeout(loadAllowedUsers, 30000);
   });
 }
