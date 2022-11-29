@@ -3,6 +3,8 @@ const { auth, requiresAuth } = require('express-openid-connect');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const httpProxy = require('http-proxy');
+const proxy = httpProxy.createProxyServer();
 
 const PORT = 3000;
 
@@ -109,41 +111,6 @@ console.log(`Using upstream ${UPSTREAM_HOST}:${UPSTREAM_PORT}`);
 
 app.use(auth(config));
 
-function proxy(req, res) {
-  const headers = {};
-  for(let [key, value] of Object.entries(req.headers)) {
-    const lowerKey = key.toLowerCase();
-    if(lowerKey !== 'host' && lowerKey !== 'connection') {
-      headers[key] = value;
-    }
-  }
-  const proxyReq = UPSTREAM_PROTO.request(
-    {
-      hostname: UPSTREAM_HOST,
-      port: UPSTREAM_PORT,
-      path: req.url,
-      method: req.method,
-      headers: headers,
-    },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      proxyRes.on('data', (chunk) => {
-        res.write(chunk, 'binary');
-      });
-      proxyRes.on('end', () => {
-        res.end()
-      });
-    },
-  );
-
-  req.on('data', (chunk) => {
-    proxyReq.write(chunk, 'binary');
-  });
-  req.on('end', () => {
-    proxyReq.end();
-  });
-}
-
 app.all('/*', (req, res) => {
   // Check bypass token, then OIDC login
   if(req.headers['x-oidc-proxy-bypass']) {
@@ -168,9 +135,14 @@ app.all('/*', (req, res) => {
   }
 
   // Otherwise, proxy
-  proxy(req, res);
+  proxy.web(req, res, {target: upstream_url});
 });
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+server.on('upgrade', (req, socket, head) => {
+  proxy.ws(req, socket, head, {target: upstream_url});
+});
+
+server.listen(PORT, () => {
   console.log(`app listening on port ${PORT}`);
 });
